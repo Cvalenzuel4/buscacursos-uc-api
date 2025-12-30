@@ -1,0 +1,18 @@
+# Render configuration
+# This file tells Render how to deploy the application
+
+services:
+  - type: web
+    name: buscacursos-uc-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: CACHE_TTL_SECONDS
+        value: "300"
+      - key: LOG_LEVEL
+        value: INFO
