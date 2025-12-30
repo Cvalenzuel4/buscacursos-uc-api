@@ -8,6 +8,7 @@ Simplicity is the best anti-bot strategy.
 from urllib.parse import urlencode
 
 from curl_cffi.requests import AsyncSession, Response
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -21,8 +22,8 @@ logger = get_logger("http_client")
 
 BUSCACURSOS_BASE = "https://buscacursos.uc.cl"
 
-# Chrome 120 impersonation for TLS fingerprint bypass
-BROWSER_IMPERSONATE = "chrome120"
+# Chrome 124 impersonation for TLS fingerprint bypass
+BROWSER_IMPERSONATE = "chrome124"
 
 
 # =============================================================================
@@ -131,11 +132,22 @@ class ScrapingHTTPClient:
         query_string = urlencode(params)
         url = f"{BUSCACURSOS_BASE}/?{query_string}"
         
-        logger.info(f"Fetching: {BUSCACURSOS_BASE}/ | sigla={sigla}, semestre={semestre}")
-        
-        # Single request - no retries
-        response = await session.get(url, headers=headers)
-        
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type(Exception),
+            reraise=True
+        )
+        async def _make_request():
+            logger.info(f"Fetching: {BUSCACURSOS_BASE}/ | sigla={sigla}, semestre={semestre}")
+            return await session.get(url, headers=headers)
+
+        try:
+            response = await _make_request()
+        except Exception as e:
+            logger.error(f"Failed after retries: {e}")
+            raise
+
         logger.debug(f"Response status: {response.status_code}")
         
         if response.status_code != 200:

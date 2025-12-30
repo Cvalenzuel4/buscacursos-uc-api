@@ -43,3 +43,34 @@ async def clear_cache_endpoint() -> dict:
         "success": True,
         "message": f"Cache cleared: {count} entries removed",
     }
+
+
+@router.get(
+    "/health/scrape-test",
+    summary="Prueba de conectividad de scraping",
+    description="Intenta conectar a Buscacursos y devuelve el estado HTTP. Útil para diagnosticar bloqueos (403).",
+)
+async def scrape_test_endpoint():
+    """
+    Diagnostic endpoint to check if Render IP is blocked.
+    """
+    from app.services.http_client import get_http_client
+    
+    client = get_http_client()
+    url = "https://buscacursos.uc.cl/"
+    
+    try:
+        # Use fetch method which is a simple GET
+        response = await client.fetch(url)
+        return {
+            "success": True,
+            "status_code": response.status_code,
+            "url": url,
+            "headers": dict(response.headers),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "detail": "Failed to connect to Buscacursos. Likely IP block or timeout.",
+        }
