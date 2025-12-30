@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # API Configuration
     app_name: str = "BuscaCursos UC API"
-    app_version: str = "1.0.0"
+    app_version: str = "1.1.0"  # Hybrid Strategy Release
     environment: str = "development"
     debug: bool = False
     
@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # HTTP Client Configuration
     http_timeout: float = 30.0
     http_max_retries: int = 3
+    proxy_url: str | None = None  # Format: http://user:pass@host:port
     
     @property
     def cors_origins(self) -> List[str]:
