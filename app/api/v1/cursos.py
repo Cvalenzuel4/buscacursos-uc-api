@@ -12,6 +12,7 @@ from app.models.schemas import (
     BusquedaParams,
     CursoSchema,
     ErrorResponse,
+    VacanteDistribucion,
 )
 from app.services.scraper import buscar_cursos
 
@@ -188,3 +189,44 @@ async def get_curso_info(
         profesor=None,
         campus=None,
     )
+
+
+@router.get(
+    "/vacantes",
+    response_model=APIResponse[list[VacanteDistribucion]],
+    summary="Detalle de vacantes",
+    description="Obtiene la distribución detallada de vacantes (reservadas, libres) para una sección específica.",
+)
+async def get_vacantes_endpoint(
+    nrc: Annotated[str, Query(description="NRC del curso")],
+    semestre: Annotated[str, Query(description="Semestre (ej: 2025-1)")] = "2026-1",
+) -> APIResponse[list[VacanteDistribucion]]:
+    """
+    Get detailed vacancy distribution.
+    """
+    try:
+        from app.services.scraper import get_vacantes_detalle
+        from app.models.schemas import VacanteDistribucion
+
+        detalles = await get_vacantes_detalle(nrc=nrc, semestre=semestre)
+        
+        return APIResponse(
+            success=True,
+            data=detalles,
+            message="Detalle de vacantes obtenido exitosamente",
+            meta={
+                "nrc": nrc,
+                "semestre": semestre
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching vacancies: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "success": False,
+                "error": "INTERNAL_ERROR",
+                "detail": str(e),
+            },
+        )

@@ -35,6 +35,7 @@ class HorarioSchema(BaseModel):
         examples=["A-101", "B-302"]
     )
     
+    
     class Config:
         json_schema_extra = {
             "example": {
@@ -49,6 +50,17 @@ class HorarioSchema(BaseModel):
 # ============================================================================
 # Course/Curso Schemas
 # ============================================================================
+
+class VacanteDistribucion(BaseModel):
+    """Details of vacancy distribution (reserved, free, etc.)."""
+    escuela: str = Field(..., description="Escuela o Categoría (ej: Vacantes libres, Ingeniería)")
+    programa: str = Field(default="", description="Programa asociado")
+    concentracion: str = Field(default="", description="Concentración")
+    categoria: str = Field(default="", description="Categoría (deprecated)")
+    ofrecidas: int = Field(default=0, description="Vacantes ofrecidas")
+    ocupadas: int = Field(default=0, description="Vacantes ocupadas")
+    disponibles: int = Field(default=0, description="Vacantes disponibles")
+
 
 class CursoSchema(BaseModel):
     """Schema for a course section."""
@@ -99,6 +111,10 @@ class CursoSchema(BaseModel):
         default=0,
         description="Número de vacantes disponibles",
         ge=0
+    )
+    vacantes_distribucion: list[VacanteDistribucion] | None = Field(
+        default=None,
+        description="Detalle de distribución de vacantes (opcional, carga bajo demanda)"
     )
     horarios: list[HorarioSchema] = Field(
         default_factory=list,

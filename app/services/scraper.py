@@ -33,7 +33,7 @@ from bs4 import BeautifulSoup, Tag
 
 from app.core.cache import cached
 from app.core.logging import get_logger
-from app.models.schemas import CursoSchema, HorarioSchema
+from app.models.schemas import CursoSchema, HorarioSchema, VacanteDistribucion
 from app.services.http_client import get_http_client
 
 logger = get_logger("scraper")
@@ -404,4 +404,59 @@ async def get_semestres_disponibles() -> List[str]:
         
     except Exception as e:
         logger.error(f"Error fetching semesters: {e}")
+        return []
+
+
+async def get_vacantes_detalle(nrc: str, semestre: str) -> List[VacanteDistribucion]:
+    """
+    Fetch detailed vacancy distribution for a specific course section (NRC).
+    """
+    from app.core.config import get_settings
+    settings = get_settings()
+    client = get_http_client()
+    
+    # URL construction
+    base_url = settings.buscacursos_base_url
+    url = f"{base_url}/informacionVacReserva.ajax.php?nrc={nrc}&termcode={semestre}"
+    
+    try:
+        logger.info(f"Fetching vacancies details for NRC {nrc} - {semestre}")
+        response = await client.fetch(url)
+        
+        soup = BeautifulSoup(response.text, "lxml")
+        
+        # Find rows
+        rows = soup.find_all("tr", class_=re.compile(r"resultadosRow(Par|Impar)"))
+        
+        results: List[VacanteDistribucion] = []
+        
+        for row in rows:
+            cols = row.find_all("td")
+            # Need at least 9 cols
+            if len(cols) < 9:
+                continue
+            
+            # Extract data
+            escuela = extract_text(cols[1])
+            programa = extract_text(cols[2])
+            concentracion = extract_text(cols[3])
+            # Skip cols 4, 5
+            ofrecidas = clean_int(extract_text(cols[6]))
+            ocupadas = clean_int(extract_text(cols[7]))
+            disponibles = clean_int(extract_text(cols[8]))
+            
+            results.append(VacanteDistribucion(
+                escuela=escuela,
+                programa=programa,
+                concentracion=concentracion,
+                ofrecidas=ofrecidas,
+                ocupadas=ocupadas,
+                disponibles=disponibles
+            ))
+            
+        logger.info(f"Found {len(results)} vacancy types for NRC {nrc}")
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error fetching vacancy details for {nrc}: {e}")
         return []

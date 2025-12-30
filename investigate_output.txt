@@ -1,0 +1,140 @@
+Searching for MAT1610 in 2025-1...
+Fetching vacancy details from: https://buscacursos.uc.cl/informacionVacReserva.ajax.php?nrc=14778&termcode=2025-1
+Status Code: 200
+Content:
+<html>
+	<head>
+		<link rel="stylesheet" href="css/estilo.css" type="text/css">
+		<link rel="stylesheet" href="css/jquery.cluetip.css" type="text/css">
+		<link rel="stylesheet" href="js/colorbox/colorbox.css" type="text/css">
+	</head>
+	<body>
+		<table width="100%" cellpadding="3" cellspacing="1" border="0">
+			<tbody>
+				<tr>
+					<td style="text-align:center; font-weight:bold; font-size:16px; color:#FFFFFF; background:#1730A6; padding:2px; margin:2px" colspan="9">Detalle de Vacantes Disponibles</td>
+				</tr>
+								<tr style="background:#CCD1E5;">
+							<td style="font-weight:bold;font-size:11px;text-align:center;" colspan="6">Curso</td>
+							<td style="font-weight:bold;font-size:11px;text-align:center;" >NRC</td>
+							<td style="font-weight:bold;font-size:11px;text-align:center;" >A&ntilde;o Periodo</td>
+							<td style="font-weight:bold;font-size:11px;text-align:center;" >Sigla Secci&oacute;n</td>
+				</tr>
+				<!--</tr>-->
+				
+											<tr class="resultadosRowPar">
+								<td style="font-size:13px;text-align:left;" colspan="6">
+									Cálculo I								</td>
+								<td style="font-size:13px;text-align:center;" >
+									14778								</td>
+								<td style="font-size:13px;text-align:center;" >
+									202520								</td>
+								<td style="font-size:13px;text-align:center;" >
+									MAT1610-1								</td>
+							</tr>
+							<tr style="background:#CCD1E5;">
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Nivel</td>
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Escuela</td>
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Programa</td>
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Concentraci&oacute;n (Ca-Maj-Min)</td>
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Cohorte</td>
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Prdo Admisi&oacute;n</td>
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Ofrecidas</td>
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Ocupadas</td>
+								<td style="font-weight:bold;font-size:11px;text-align:center;" rowspan="1">Disponibles</td>	
+							</tr>
+							<tr class="resultadosRowImpar">
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:60px;">
+															</td>	
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:150px;">
+								Vacantes libres							</td>		
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:30px;">
+															</td>			
+							<td style="font-size:13px;text-align:center;">
+								5							</td>			
+							<td style="font-size:13px;text-align:center;">
+								3							</td>			
+							<td style="font-size:13px;text-align:center;">
+								2							</td>
+						</tr>
+<tr class="resultadosRowPar">
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:60px;">
+															</td>	
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:150px;">
+								05 - Economía y Administración							</td>		
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+								Per 202520 Ingeniería Comercial							</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:30px;">
+								202520							</td>			
+							<td style="font-size:13px;text-align:center;">
+								80							</td>			
+							<td style="font-size:13px;text-align:center;">
+								72							</td>			
+							<td style="font-size:13px;text-align:center;">
+								8							</td>
+						</tr>
+<tr class="resultadosRowImpar">
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:60px;">
+															</td>	
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:150px;">
+								05 - Economía y Administración							</td>		
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:30px;">
+															</td>			
+							<td style="font-size:13px;text-align:center;">
+								10							</td>			
+							<td style="font-size:13px;text-align:center;">
+								5							</td>			
+							<td style="font-size:13px;text-align:center;">
+								5							</td>
+						</tr>
+<tr class="resultadosRowPar">
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:60px;">
+															</td>	
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:150px;">
+								09 - College							</td>		
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:200px;">
+															</td>			
+							<td style="font-size:13px;text-align:left; white-space:normal;word-wrap:break-word;max-width:30px;">
+															</td>			
+							<td style="font-size:13px;text-align:center;">
+								30							</td>			
+							<td style="font-size:13px;text-align:center;">
+								20							</td>			
+							<td style="font-size:13px;text-align:center;">
+								10							</td>
+						</tr>
+				<tr>
+					<td>&nbsp;</td>
+				</tr>
+				<tr class="resultadosRowPar">
+						<td style="font-weight: bold;font-size:15px;text-align:right;" colspan="7">
+							TOTAL DISPONIBLES : 
+						</td>			
+						<td style="font-weight: bold;font-size:15px;text-align:center;">
+							25						</td>
+				</tr>
+							</tbody>
+		</table>	
+	<script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" integrity="sha512-ZpsOmlRQV6y907TI0dKBHq9Md29nnaEIPlkf84rnaERnq6zvWvPUqr2ft8M1aS28oN72PdrCzSjY4U6VaAw1EQ==" data-cf-beacon='{"version":"2024.11.0","token":"d8a8af7fbf3844798c43014b87b7f2d6","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b651c863d8a2fce',t:'MTc2NzEzNTE4Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

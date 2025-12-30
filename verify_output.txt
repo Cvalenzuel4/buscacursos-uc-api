@@ -1,0 +1,6 @@
+Fetching vacancies for NRC 14778...
+Got 4 rows.
+Vacantes libres: 2 disponibles (de 5)
+05 - Economía y Administración: 8 disponibles (de 80)
+05 - Economía y Administración: 5 disponibles (de 10)
+09 - College: 10 disponibles (de 30)
