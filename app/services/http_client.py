@@ -1,11 +1,12 @@
 """
-HTTP client using Hybrid Strategy:
-- Local (Development): curl_cffi direct connection (Anti-Fingerprint)
-- Production (Render): httpx via Google Apps Script Proxy (Anti-IP Block)
+HTTP client for BuscaCursos UC.
+
+STRATEGY:
+- DEVELOPMENT: Direct connection using curl_cffi (impersonating Chrome).
+- PRODUCTION: Route through Cloudflare Worker to bypass IP blocking.
 """
 import os
-from urllib.parse import urlencode
-
+import urllib.parse
 import httpx
 from curl_cffi.requests import AsyncSession, Response
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -15,72 +16,62 @@ from app.core.logging import get_logger
 
 logger = get_logger("http_client")
 
-# =============================================================================
-# Constants
-# =============================================================================
-
+# WORKER URL PROVIDED BY USER
+WORKER_PROXY_URL = "https://proxy-uc.cristianvalmo.workers.dev/"
 BUSCACURSOS_BASE = "https://buscacursos.uc.cl"
-GAS_PROXY_URL = "https://script.google.com/macros/s/AKfycbyn9R4plCwGpy0dYvSnvVlgTT53XWPgy01aovlidHAFfCupgUrT_FBE8BLk0HX2-yP1/exec"
 
-# Local chrome impersonation
-BROWSER_IMPERSONATE = "chrome120"
+# Chrome impersonation for local dev
+BROWSER_IMPERSONATE = "chrome124"
 
-
-# =============================================================================
-# Headers - Minimal & Clean (For Local)
-# =============================================================================
-
-def get_browser_headers() -> dict[str, str]:
-    """Headers for local curl_cffi requests."""
-    return {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Referer": f"{BUSCACURSOS_BASE}/",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-User": "?1",
-        "Connection": "keep-alive"
-    }
-
-
-# =============================================================================
-# Main HTTP Client Class - Hybrid
-# =============================================================================
 
 class ScrapingHTTPClient:
     """
-    Hybrid HTTP Client.
-    Adapts strategy based on ENVIRONMENT variable.
+    Hybrid HTTP Client:
+    - In PRODUCTION: Uses httpx to call Cloudflare Worker.
+    - In DEVELOPMENT: Uses curl_cffi for direct connection.
     """
-    
+
     def __init__(self):
         self._session: AsyncSession | None = None
         self._settings = get_settings()
-        self._env = os.getenv("ENVIRONMENT", "development")
-    
+        self._httpx_client: httpx.AsyncClient | None = None
+
     async def _get_local_session(self) -> AsyncSession:
-        """Get or create the async session for Local/Dev."""
+        """Get curl_cffi session for local development."""
         if self._session is None:
             self._session = AsyncSession(
                 impersonate=BROWSER_IMPERSONATE,
                 timeout=self._settings.http_timeout,
                 verify=True,
-                # proxy=self._settings.proxy_url # Legacy proxy support if needed
             )
-            logger.debug(f"Local Session created with {BROWSER_IMPERSONATE}")
+            logger.debug(f"Local Session created: {BROWSER_IMPERSONATE}")
         return self._session
-    
+
+    async def _get_httpx_client(self) -> httpx.AsyncClient:
+        """Get httpx client for production (Worker communication)."""
+        if self._httpx_client is None:
+            self._httpx_client = httpx.AsyncClient(
+                timeout=self._settings.http_timeout,
+                follow_redirects=True
+            )
+        return self._httpx_client
+
     async def close(self) -> None:
-        """Close the session (only relevant for local)."""
+        """Close all sessions."""
         if self._session:
             await self._session.close()
             self._session = None
-            logger.debug("Session closed")
-    
+        if self._httpx_client:
+            await self._httpx_client.aclose()
+            self._httpx_client = None
+        logger.debug("Sessions closed")
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(Exception),
+        reraise=True
+    )
     async def search_courses(
         self,
         semestre: str,
@@ -90,11 +81,11 @@ class ScrapingHTTPClient:
         profesor: str = "",
         campus: str = "",
         unidad_academica: str = "",
-    ) -> Response | httpx.Response:
+    ) -> Response:
         """
-        Search courses using Hybrid Strategy.
+        Search courses using the appropriate strategy based on environment.
         """
-        # Build query parameters
+        # Build query parameters first
         params = {
             "cxml_semestre": semestre,
             "cxml_sigla": sigla.upper() if sigla else "",
@@ -106,108 +97,90 @@ class ScrapingHTTPClient:
             "cxml_horario_tipo_busqueda": "si_tenga",
             "cxml_horario_tipo_busqueda_actividad": "",
         }
-        
-        # Build Target URL
-        query_string = urlencode(params)
-        target_url = f"{BUSCACURSOS_BASE}/?{query_string}"
-        
-        logger.info(f"[{self._env.upper()}] Fetching: {target_url}")
 
-        if self._env == "production":
-            return await self._fetch_production(target_url)
-        else:
-            return await self._fetch_local(target_url)
+        env = self._settings.environment.lower()
+        url_base = f"{BUSCACURSOS_BASE}/"
 
-    async def fetch(self, url: str) -> Response | httpx.Response:
-        """Generic GET request using Hybrid Strategy."""
-        logger.info(f"[{self._env.upper()}] Generic Fetch: {url}")
-        
-        if self._env == "production":
-            return await self._fetch_production(url)
-        else:
-            return await self._fetch_local(url)
-
-    # --- STRATEGIES ---
-
-    async def _fetch_production(self, target_url: str) -> httpx.Response:
-        """
-        [PRODUCTION] Use httpx + Google Apps Script Proxy.
-        """
-        proxy_params = {"url": target_url}
-        
-        try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.get(GAS_PROXY_URL, params=proxy_params)
-                
-                if response.status_code != 200:
-                    logger.error(f"❌ Google Proxy Error: {response.status_code}")
-                    # Return mock response to avoid crash, or raise? 
-                    # Raising allows generic handler to catch it.
-                    response.raise_for_status()
-                
-                logger.info("✅ Proxy request successful")
-                return response
-                
-        except Exception as e:
-            logger.error(f"❌ Production Connection Error: {e}")
-            raise
-
-    async def _fetch_local(self, target_url: str) -> Response:
-        """
-        [LOCAL] Use curl_cffi directly.
-        """
-        session = await self._get_local_session()
-        headers = get_browser_headers()
-        
-        # Retry logic for local flakes
-        @retry(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=2, max=10),
-            retry=retry_if_exception_type(Exception),
-            reraise=True
-        )
-        async def _make_request():
-            return await session.get(target_url, headers=headers)
-
-        try:
-            response = await _make_request()
+        # --- PRODUCTION: CLOUDFLARE WORKER STRATEGY ---
+        if env == "production":
+            logger.info(f"🚀 Modo PROD: Routing via Cloudflare Worker -> {WORKER_PROXY_URL}")
             
-            if response.status_code == 403:
-                logger.error("❌ LOCAL BLOCK (403): Cloudflare/WAF detected script.")
-            elif response.status_code != 200:
-                logger.error(f"HTTP {response.status_code} from BuscaCursos (Local)")
-                raise Exception(f"HTTP {response.status_code}")
-                
+            client = await self._get_httpx_client()
+            
+            # 1. Build full target URL manually because Worker expects it in 'url' param
+            query_string = urllib.parse.urlencode(params)
+            target_url = f"{url_base}?{query_string}"
+            
+            # 2. Worker expects target URL in 'url' query param
+            # httpx handles encoding of the 'url' param value itself
+            proxy_params = {"url": target_url}
+            
+            logger.debug(f"Worker Target: {target_url}")
+
+            response = await client.get(WORKER_PROXY_URL, params=proxy_params)
+
+            if response.status_code != 200:
+                logger.error(f"❌ Error Worker: {response.status_code}")
+                # Log snippet for debugging
+                logger.error(f"Worker Body Snippet: {response.text[:200]}")
+                raise Exception(f"Worker failed with {response.status_code}")
+
+            # Return compatible Response object (curl_cffi style)
+            # We wrap httpx response in a curl_cffi-like object or return it directly 
+            # (since response.text and .status_code are compatible)
             return response
-        except Exception as e:
-            logger.error(f"❌ Local Connection Error: {e}")
-            raise
 
-    # Legacy compatibility
-    async def get_session(self) -> AsyncSession:
-        return await self._get_local_session()
-    
-    async def ensure_session(self) -> None:
-        await self._get_local_session()
+        # --- DEVELOPMENT: LOCAL CURL_CFFI STRATEGY ---
+        else:
+            logger.info(f"💻 Modo LOCAL: Direct connection with {BROWSER_IMPERSONATE}")
+            session = await self._get_local_session()
+            
+            headers = {
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
+                "Referer": f"{BUSCACURSOS_BASE}/",
+                "Upgrade-Insecure-Requests": "1",
+            }
 
+            # Build URL fully to be consistent with prod logic logging
+            query_string = urllib.parse.urlencode(params)
+            url = f"{url_base}?{query_string}"
+
+            response = await session.get(url, headers=headers)
+
+            if response.status_code != 200:
+                logger.error(f"HTTP {response.status_code} from BuscaCursos (Local)")
+                raise Exception(f"HTTP {response.status_code}: Request failed")
+            
+            return response
+
+    async def fetch(self, url: str) -> Response:
+        """
+        Generic GET request for checks/health.
+        """
+        env = self._settings.environment.lower()
+        
+        if env == "production":
+            client = await self._get_httpx_client()
+            proxy_params = {"url": url}
+            return await client.get(WORKER_PROXY_URL, params=proxy_params)
+        else:
+            session = await self._get_local_session()
+            return await session.get(url)
 
 # =============================================================================
-# Global Client Instance (Singleton)
+# Global Client Instance
 # =============================================================================
 
 _http_client: ScrapingHTTPClient | None = None
 
-
 def get_http_client() -> ScrapingHTTPClient:
-    """Get the global HTTP client instance."""
     global _http_client
     if _http_client is None:
         _http_client = ScrapingHTTPClient()
     return _http_client
 
-
 async def close_http_client() -> None:
-    """Close the global HTTP client."""
     global _http_client
     if _http_client:
         await _http_client.close()

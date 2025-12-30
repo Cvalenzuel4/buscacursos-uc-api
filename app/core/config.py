@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # API Configuration
     app_name: str = "BuscaCursos UC API"
-    app_version: str = "1.1.0"  # Hybrid Strategy Release
+    app_version: str = "1.0.0"
     environment: str = "development"
     debug: bool = False
     
