@@ -77,6 +77,68 @@ GET /api/v1/cursos/buscar?sigla=ICS2123&semestre=2026-1
 GET /api/v1/cursos/info/{sigla}?semestre=2026-1
 ```
 
+### Buscar Múltiples Cursos (Paralelo)
+```http
+POST /api/v1/cursos/buscar-multiple
+Content-Type: application/json
+
+{
+  "siglas": ["ICS2123", "MAT1610", "FIS1513"],
+  "semestre": "2026-1"
+}
+```
+
+**Ventajas:**
+- ⚡ Una sola petición HTTP para múltiples siglas
+- 🚀 Ejecución paralela: 5 siglas toman casi el mismo tiempo que 1
+- ✅ Resultados individuales por sigla (éxito/error separados)
+
+**Límites:**
+- Máximo 20 siglas por petición
+
+**Respuesta:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "sigla": "ICS2123",
+      "success": true,
+      "cursos": [
+        {
+          "nrc": "16515",
+          "sigla": "ICS2123",
+          "seccion": 1,
+          "nombre": "Modelos Estocásticos",
+          "profesor": "Verdugo Victor",
+          "horarios": [...]
+        }
+      ],
+      "error": null
+    },
+    {
+      "sigla": "MAT1610",
+      "success": true,
+      "cursos": [...],
+      "error": null
+    },
+    {
+      "sigla": "INVALID",
+      "success": false,
+      "cursos": [],
+      "error": "No se encontraron cursos"
+    }
+  ],
+  "message": "Búsqueda completada: 2/3 siglas exitosas, 8 secciones encontradas",
+  "meta": {
+    "semestre": "2026-1",
+    "siglas_solicitadas": 3,
+    "siglas_exitosas": 2,
+    "total_secciones": 8
+  }
+}
+```
+
 ### Health Check
 ```http
 GET /api/v1/health
@@ -183,9 +245,34 @@ async function buscarCursos(sigla, semestre = '2026-1') {
   throw new Error(data.message);
 }
 
-// Uso
+// Búsqueda múltiple (paralela)
+async function buscarMultiplesCursos(siglas, semestre = '2026-1') {
+  const response = await fetch(`${API_URL}/api/v1/cursos/buscar-multiple`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ siglas, semestre })
+  });
+  const data = await response.json();
+  
+  if (data.success) {
+    // data.data es un array con resultados por sigla
+    return data.data;
+  }
+  throw new Error(data.message);
+}
+
+// Uso individual
 const cursos = await buscarCursos('ICS2123');
-console.log(cursos);
+
+// Uso múltiple - una sola petición para todas las siglas
+const resultados = await buscarMultiplesCursos(['ICS2123', 'MAT1610', 'FIS1513']);
+resultados.forEach(r => {
+  if (r.success) {
+    console.log(`${r.sigla}: ${r.cursos.length} secciones`);
+  } else {
+    console.log(`${r.sigla}: Error - ${r.error}`);
+  }
+});
 ```
 
 ### Python
@@ -205,9 +292,28 @@ def buscar_cursos(sigla: str, semestre: str = '2026-1'):
         return data['data']
     raise Exception(data['message'])
 
-# Uso
+# Búsqueda múltiple (paralela)
+def buscar_multiples_cursos(siglas: list[str], semestre: str = '2026-1'):
+    response = requests.post(
+        f'{API_URL}/api/v1/cursos/buscar-multiple',
+        json={'siglas': siglas, 'semestre': semestre}
+    )
+    data = response.json()
+    
+    if data['success']:
+        return data['data']
+    raise Exception(data['message'])
+
+# Uso individual
 cursos = buscar_cursos('ICS2123')
-print(cursos)
+
+# Uso múltiple
+resultados = buscar_multiples_cursos(['ICS2123', 'MAT1610', 'FIS1513'])
+for r in resultados:
+    if r['success']:
+        print(f"{r['sigla']}: {len(r['cursos'])} secciones")
+    else:
+        print(f"{r['sigla']}: Error - {r['error']}")
 ```
 
 ## 📄 Licencia

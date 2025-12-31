@@ -1,15 +1,18 @@
 """
 Course search endpoints.
 """
+import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import ValidationError
 
 from app.core.logging import get_logger
 from app.models.schemas import (
     APIResponse,
+    BusquedaMultipleRequest,
     BusquedaParams,
+    CursoPorSigla,
     CursoSchema,
     ErrorResponse,
     VacanteDistribucion,
@@ -230,3 +233,101 @@ async def get_vacantes_endpoint(
                 "detail": str(e),
             },
         )
+
+
+@router.post(
+    "/buscar-multiple",
+    response_model=APIResponse[list[CursoPorSigla]],
+    responses={
+        200: {
+            "description": "Resultados de búsqueda por sigla",
+            "model": APIResponse[list[CursoPorSigla]],
+        },
+        400: {
+            "description": "Parámetros de búsqueda inválidos",
+            "model": ErrorResponse,
+        },
+        500: {
+            "description": "Error interno del servidor",
+            "model": ErrorResponse,
+        },
+    },
+    summary="Buscar múltiples cursos",
+    description="""
+Busca múltiples cursos en paralelo con una sola petición.
+
+**Ventajas:**
+- Una sola petición HTTP para múltiples siglas
+- Ejecución paralela: ~5 siglas toman el mismo tiempo que 1
+- Resultados individuales por sigla (éxito/error separados)
+
+**Límites:**
+- Máximo 20 siglas por petición
+
+**Ejemplo de uso:**
+```json
+POST /api/v1/cursos/buscar-multiple
+{
+  "siglas": ["ICS2123", "MAT1610", "FIS1513"],
+  "semestre": "2026-1"
+}
+```
+
+**Notas:**
+- Cada sigla genera una petición a BuscaCursos UC (en paralelo)
+- Si una sigla falla, las demás siguen funcionando
+- Los resultados se cachean individualmente por 5 minutos
+""",
+)
+async def buscar_cursos_multiple_endpoint(
+    request: BusquedaMultipleRequest,
+) -> APIResponse[list[CursoPorSigla]]:
+    """
+    Search for multiple courses in parallel using asyncio.gather.
+    """
+    logger.info(f"Bulk search: {len(request.siglas)} siglas - {request.semestre}")
+    
+    async def buscar_una_sigla(sigla: str) -> CursoPorSigla:
+        """Search a single sigla and wrap the result."""
+        try:
+            cursos = await buscar_cursos(
+                sigla=sigla,
+                semestre=request.semestre,
+                profesor=None,
+                campus=None,
+            )
+            return CursoPorSigla(
+                sigla=sigla,
+                success=True,
+                cursos=cursos,
+                error=None,
+            )
+        except Exception as e:
+            logger.warning(f"Error searching {sigla}: {e}")
+            return CursoPorSigla(
+                sigla=sigla,
+                success=False,
+                cursos=[],
+                error=str(e),
+            )
+    
+    # Execute all searches in parallel
+    resultados = await asyncio.gather(
+        *[buscar_una_sigla(sigla) for sigla in request.siglas]
+    )
+    
+    # Count successes and total courses
+    exitosos = sum(1 for r in resultados if r.success)
+    total_cursos = sum(len(r.cursos) for r in resultados)
+    
+    return APIResponse(
+        success=True,
+        data=list(resultados),
+        message=f"Búsqueda completada: {exitosos}/{len(request.siglas)} siglas exitosas, {total_cursos} secciones encontradas",
+        meta={
+            "semestre": request.semestre,
+            "siglas_solicitadas": len(request.siglas),
+            "siglas_exitosas": exitosos,
+            "total_secciones": total_cursos,
+        },
+    )

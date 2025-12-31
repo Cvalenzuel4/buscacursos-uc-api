@@ -200,6 +200,65 @@ class BusquedaParams(BaseModel):
         return v
 
 
+class BusquedaMultipleRequest(BaseModel):
+    """Request body for bulk course search."""
+    
+    siglas: list[str] = Field(
+        ...,
+        description="Lista de siglas a buscar (máximo 20)",
+        min_length=1,
+        max_length=20,
+        examples=[["ICS2123", "MAT1610", "FIS1513"]]
+    )
+    semestre: str = Field(
+        ...,
+        description="Semestre en formato YYYY-S",
+        examples=["2026-1", "2025-2"]
+    )
+    
+    @field_validator("siglas")
+    @classmethod
+    def validate_siglas(cls, v: list[str]) -> list[str]:
+        """Validate and normalize all siglas."""
+        normalized = []
+        for sigla in v:
+            sigla = sigla.strip().upper()
+            if not re.match(r"^[A-Z]{3}\d{3,4}[A-Z]?$", sigla):
+                raise ValueError(
+                    f"Formato de sigla inválido: '{sigla}'. "
+                    "Debe ser 3 letras + 3-4 dígitos + letra opcional"
+                )
+            normalized.append(sigla)
+        return normalized
+    
+    @field_validator("semestre")
+    @classmethod
+    def validate_semestre(cls, v: str) -> str:
+        """Validate semester format."""
+        v = v.strip()
+        if not re.match(r"^20\d{2}-[12S]$", v):
+            raise ValueError(
+                f"Formato de semestre inválido: '{v}'. "
+                "Debe ser YYYY-S donde S es 1, 2 o S"
+            )
+        return v
+
+
+class CursoPorSigla(BaseModel):
+    """Result wrapper for each sigla in bulk search."""
+    
+    sigla: str = Field(..., description="Sigla buscada")
+    success: bool = Field(..., description="Si la búsqueda fue exitosa")
+    cursos: list["CursoSchema"] = Field(
+        default_factory=list,
+        description="Cursos encontrados para esta sigla"
+    )
+    error: str | None = Field(
+        default=None,
+        description="Mensaje de error si la búsqueda falló"
+    )
+
+
 # ============================================================================
 # API Response Wrappers
 # ============================================================================
