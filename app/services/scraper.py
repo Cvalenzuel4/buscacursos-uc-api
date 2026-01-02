@@ -89,22 +89,26 @@ def extract_text(element: Tag | None) -> str:
 #   <tr><td>L-W:2</td><td>CLAS</td><td>(Por Asignar)</td></tr>  <-- Multi-day!
 #   <tr><td>V:2</td><td>AYU</td><td>(Por Asignar)</td></tr>
 #
-# Formats:
+# Formats supported (1 to 7 days):
 #   - Single day: "M:5" or "J:5,6" 
-#   - Multi-day: "L-W:2" (Lunes AND Miércoles módulo 2)
-#   - Multi-day: "M-J:3" (Martes AND Jueves módulo 3)
+#   - 2 days: "L-W:2" (Lunes AND Miércoles módulo 2)
+#   - 2 days: "M-J:3" (Martes AND Jueves módulo 3)
+#   - 3 days: "L-W-V:3" (Lunes, Miércoles AND Viernes módulo 3)
+#   - 4+ days: "L-M-W-J:1", "L-M-W-J-V:2", "L-M-W-J-V-S:3", etc.
 #
-# Regex captures: DIAS:MODULOS where DIAS can be "L", "M-J", "L-W", etc.
-SCHEDULE_CELL_PATTERN = re.compile(r'^([LMWJVSD](?:-[LMWJVSD])?):(.+)$', re.IGNORECASE)
+# Regex captures: DIAS:MODULOS where DIAS can have 1-7 day codes separated by hyphens
+# Valid day codes: L=Lunes, M=Martes, W=Miércoles, J=Jueves, V=Viernes, S=Sábado, D=Domingo
+SCHEDULE_CELL_PATTERN = re.compile(r'^([LMWJVSD](?:-[LMWJVSD])*):(.+)$', re.IGNORECASE)
 
 
 def parse_schedule_table(schedule_cell: Tag) -> List[HorarioSchema]:
     """
     Parse schedule from nested table structure.
     
-    Handles MULTI-DAY format like "L-W:2" which expands to:
-      - Lunes módulo 2
-      - Miércoles módulo 2
+    Handles MULTI-DAY format like "L-W:2" or "L-W-V:3" which expands to:
+      - Lunes módulo 2 (or 3)
+      - Miércoles módulo 2 (or 3)
+      - Viernes módulo 3 (for 3-day format)
     
     Structure:
     <td>
@@ -440,7 +444,8 @@ async def get_vacantes_detalle(nrc: str, semestre: str) -> List[VacanteDistribuc
             escuela = extract_text(cols[1])
             programa = extract_text(cols[2])
             concentracion = extract_text(cols[3])
-            # Skip cols 4, 5
+            cohorte = extract_text(cols[4])
+            periodo_admision = extract_text(cols[5])
             ofrecidas = clean_int(extract_text(cols[6]))
             ocupadas = clean_int(extract_text(cols[7]))
             disponibles = clean_int(extract_text(cols[8]))
@@ -449,6 +454,8 @@ async def get_vacantes_detalle(nrc: str, semestre: str) -> List[VacanteDistribuc
                 escuela=escuela,
                 programa=programa,
                 concentracion=concentracion,
+                cohorte=cohorte,
+                periodo_admision=periodo_admision,
                 ofrecidas=ofrecidas,
                 ocupadas=ocupadas,
                 disponibles=disponibles
