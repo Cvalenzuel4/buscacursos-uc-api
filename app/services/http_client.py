@@ -93,7 +93,7 @@ class ScrapingHTTPClient:
         - Proper TLS negotiation
         - Edge network IPs
         """
-        # Build query parameters
+        # Build query parameters for BuscaCursos
         params = {
             "cxml_semestre": semestre,
             "cxml_sigla": sigla.upper() if sigla else "",
@@ -107,12 +107,14 @@ class ScrapingHTTPClient:
         }
 
         query_string = urllib.parse.urlencode(params)
+        target_url = f"{BUSCACURSOS_BASE}/?{query_string}"
         
-        # Use Worker proxy
-        worker_url = f"{WORKER_URL}?{query_string}"
+        # Worker expects ?url=<encoded_target_url>
+        encoded_target = urllib.parse.quote(target_url, safe='')
+        worker_url = f"{WORKER_URL}?url={encoded_target}"
         
         logger.info(f"🔍 Searching via Worker: sigla={sigla}, semestre={semestre}")
-        logger.debug(f"Worker URL: {worker_url}")
+        logger.debug(f"Target URL: {target_url}")
 
         try:
             client = await self._get_client()
@@ -150,17 +152,14 @@ class ScrapingHTTPClient:
     async def fetch(self, url: str) -> WorkerResponse:
         """
         Generic GET request via Worker.
-        Note: This routes any URL through the Worker (for BuscaCursos paths).
+        Routes any BuscaCursos URL through the Worker proxy.
         """
         client = await self._get_client()
         
-        # If it's a BuscaCursos URL, route through worker
+        # Route through worker using ?url= parameter
         if BUSCACURSOS_BASE in url:
-            # Extract path and query from URL
-            parsed = urllib.parse.urlparse(url)
-            worker_url = f"{WORKER_URL}{parsed.path}"
-            if parsed.query:
-                worker_url += f"?{parsed.query}"
+            encoded_url = urllib.parse.quote(url, safe='')
+            worker_url = f"{WORKER_URL}?url={encoded_url}"
             response = await client.get(worker_url)
         else:
             response = await client.get(url)
