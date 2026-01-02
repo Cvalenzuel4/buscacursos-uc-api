@@ -12,13 +12,14 @@ from app.models.schemas import (
 from cachetools import TTLCache
 import asyncio
 import urllib.parse
+from app.core.config import get_settings
 
 router = APIRouter(prefix="/cursos", tags=["Cursos"])
 
 # Caché en memoria RAM (Se reinicia si el servidor se apaga)
-# TTL = 3600 segundos (1 hora).
-# Si un dato expira, NO se recarga automáticamente. Se espera a que un usuario lo pida.
-cache = TTLCache(maxsize=1000, ttl=3600)
+# TTL configurado en config.py (Default: 1 día / 86400s)
+settings = get_settings()
+cache = TTLCache(maxsize=settings.cache_max_size, ttl=settings.cache_ttl_seconds)
 
 async def _buscar_curso_logic(sigla: str, semestre: str) -> SearchResponse:
     """

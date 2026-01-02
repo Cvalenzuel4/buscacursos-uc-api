@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     buscacursos_base_url: str = "https://buscacursos.uc.cl/"
     
     # Cache Configuration
-    cache_ttl_seconds: int = 300  # 5 minutes
+    cache_ttl_seconds: int = 86400  # 24 hours
     cache_max_size: int = 1000   # Max number of cached responses
     
     # CORS Configuration
