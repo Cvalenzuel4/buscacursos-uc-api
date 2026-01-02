@@ -1,19 +1,21 @@
 """
 HTTP client for BuscaCursos UC.
 
-STRATEGY (Updated 2026-01):
-- Uses curl_cffi with Chrome impersonation in ALL environments.
-- curl_cffi can bypass Cloudflare protection by mimicking real browsers.
-- No external proxy/worker needed - direct connection with TLS fingerprint spoofing.
+STRATEGY (Updated 2025-01):
+- Uses Cloudflare Worker as proxy for scraping.
+- Worker runs from Cloudflare's edge network (residential-like IPs).
+- Worker sends complete browser headers to bypass Cloudflare protection.
+
+Worker URL: https://proxy-uc.cristianvalmo.workers.dev/
 
 This approach is:
-- 100% FREE (no external services)
-- More reliable than Workers (which can get blocked)
-- Works in both development and production
+- 100% FREE (Cloudflare Workers free tier: 100k requests/day)
+- Reliable (Cloudflare IPs are not blocked by Cloudflare)
+- Fast (edge network close to users)
 """
-import random
 import urllib.parse
-from curl_cffi.requests import AsyncSession, Response
+import httpx
+from dataclasses import dataclass
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.core.config import get_settings
@@ -22,84 +24,54 @@ from app.core.logging import get_logger
 logger = get_logger("http_client")
 
 BUSCACURSOS_BASE = "https://buscacursos.uc.cl"
+WORKER_URL = "https://proxy-uc.cristianvalmo.workers.dev/"
 
-# Chrome versions to rotate (all supported by curl_cffi)
-BROWSER_VERSIONS = [
-    "chrome120",
-    "chrome119", 
-    "chrome116",
-    "chrome110",
-    "chrome107",
-    "chrome104",
-    "chrome101",
-    "chrome100",
-    "chrome99",
-]
+
+@dataclass
+class WorkerResponse:
+    """Response wrapper to match previous interface."""
+    status_code: int
+    text: str
+    
+    @property
+    def content(self) -> bytes:
+        return self.text.encode('utf-8')
 
 
 class ScrapingHTTPClient:
     """
-    HTTP Client using curl_cffi for Cloudflare bypass.
+    HTTP Client using Cloudflare Worker as proxy.
     
-    Uses TLS fingerprint impersonation to appear as a real browser.
-    This works because curl_cffi implements the same TLS handshake as Chrome.
+    Routes all requests through the Worker which:
+    1. Runs from Cloudflare's edge network
+    2. Sends complete browser headers (Sec-Ch-Ua, Sec-Fetch-*, etc.)
+    3. Bypasses Cloudflare protection on BuscaCursos
     """
 
     def __init__(self):
-        self._session: AsyncSession | None = None
+        self._client: httpx.AsyncClient | None = None
         self._settings = get_settings()
-        self._current_browser = random.choice(BROWSER_VERSIONS)
-        self._request_count = 0
 
-    async def _get_session(self) -> AsyncSession:
-        """Get or create curl_cffi session with browser impersonation."""
-        # Rotate browser every 10 requests to avoid fingerprinting
-        if self._request_count > 0 and self._request_count % 10 == 0:
-            if self._session:
-                await self._session.close()
-                self._session = None
-            self._current_browser = random.choice(BROWSER_VERSIONS)
-            logger.debug(f"Rotated browser to: {self._current_browser}")
-        
-        if self._session is None:
-            self._session = AsyncSession(
-                impersonate=self._current_browser,
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create httpx async client."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
                 timeout=self._settings.http_timeout,
-                verify=True,
+                follow_redirects=True,
             )
-            logger.info(f"🌐 Session created with browser: {self._current_browser}")
-        
-        return self._session
-
-    def _get_headers(self) -> dict:
-        """Get realistic browser headers."""
-        return {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "Accept-Language": "es-CL,es;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Cache-Control": "max-age=0",
-            "Connection": "keep-alive",
-            "Referer": f"{BUSCACURSOS_BASE}/",
-            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1",
-        }
+            logger.info("🌐 HTTP client created for Worker proxy")
+        return self._client
 
     async def close(self) -> None:
-        """Close the session."""
-        if self._session:
-            await self._session.close()
-            self._session = None
-        logger.debug("Session closed")
+        """Close the client."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+        logger.debug("HTTP client closed")
 
     @retry(
-        stop=stop_after_attempt(5),
-        wait=wait_exponential(multiplier=1, min=2, max=15),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
         reraise=True
     )
@@ -112,17 +84,15 @@ class ScrapingHTTPClient:
         profesor: str = "",
         campus: str = "",
         unidad_academica: str = "",
-    ) -> Response:
+    ) -> WorkerResponse:
         """
-        Search courses using curl_cffi with browser impersonation.
+        Search courses via Cloudflare Worker proxy.
         
-        This bypasses Cloudflare by:
-        1. Using the same TLS fingerprint as Chrome
-        2. Sending realistic browser headers
-        3. Rotating browser versions periodically
+        The Worker handles all the Cloudflare bypass logic:
+        - Complete Chrome headers (Sec-Ch-Ua, etc.)
+        - Proper TLS negotiation
+        - Edge network IPs
         """
-        self._request_count += 1
-        
         # Build query parameters
         params = {
             "cxml_semestre": semestre,
@@ -137,36 +107,29 @@ class ScrapingHTTPClient:
         }
 
         query_string = urllib.parse.urlencode(params)
-        url = f"{BUSCACURSOS_BASE}/?{query_string}"
-
-        logger.info(f"🔍 Searching: sigla={sigla}, semestre={semestre}")
-        logger.debug(f"URL: {url}")
+        
+        # Use Worker proxy
+        worker_url = f"{WORKER_URL}?{query_string}"
+        
+        logger.info(f"🔍 Searching via Worker: sigla={sigla}, semestre={semestre}")
+        logger.debug(f"Worker URL: {worker_url}")
 
         try:
-            session = await self._get_session()
-            headers = self._get_headers()
+            client = await self._get_client()
+            response = await client.get(worker_url)
             
-            response = await session.get(url, headers=headers)
-            
-            logger.info(f"📥 Response: status={response.status_code}, length={len(response.text)}")
-
-            # Check for blocking
-            if response.status_code == 403:
-                logger.error(f"❌ 403 Forbidden - Cloudflare block detected")
-                # Close session to force new one with different browser
-                await self.close()
-                raise Exception(f"Cloudflare blocked request (403). Will retry with different browser.")
-            
-            if response.status_code != 200:
-                logger.error(f"❌ HTTP {response.status_code}")
-                raise Exception(f"HTTP {response.status_code}: Request failed")
-            
-            # Check for Cloudflare challenge page
             text = response.text
+            logger.info(f"📥 Response: status={response.status_code}, length={len(text)}")
+
+            # Check for Worker errors
+            if response.status_code != 200:
+                logger.error(f"❌ Worker returned HTTP {response.status_code}")
+                raise Exception(f"Worker error: HTTP {response.status_code}")
+            
+            # Check for Cloudflare challenge in response
             if "Just a moment" in text and "Cloudflare" in text:
-                logger.error("❌ Cloudflare challenge page detected")
-                await self.close()
-                raise Exception("Cloudflare challenge detected. Will retry with different browser.")
+                logger.error("❌ Cloudflare challenge page detected (Worker blocked)")
+                raise Exception("Cloudflare challenge detected. Worker may be blocked.")
             
             # Check if we got course data
             has_course_data = "resultadosRow" in text
@@ -175,20 +138,34 @@ class ScrapingHTTPClient:
             else:
                 logger.debug(f"No course rows found (may be empty search)")
             
-            return response
+            return WorkerResponse(status_code=response.status_code, text=text)
             
+        except httpx.TimeoutException as e:
+            logger.error(f"❌ Worker timeout: {e}")
+            raise Exception(f"Worker timeout: {e}")
         except Exception as e:
             logger.error(f"❌ Request failed: {type(e).__name__}: {e}")
             raise
 
-    async def fetch(self, url: str) -> Response:
+    async def fetch(self, url: str) -> WorkerResponse:
         """
-        Generic GET request.
+        Generic GET request via Worker.
+        Note: This routes any URL through the Worker (for BuscaCursos paths).
         """
-        self._request_count += 1
-        session = await self._get_session()
-        headers = self._get_headers()
-        return await session.get(url, headers=headers)
+        client = await self._get_client()
+        
+        # If it's a BuscaCursos URL, route through worker
+        if BUSCACURSOS_BASE in url:
+            # Extract path and query from URL
+            parsed = urllib.parse.urlparse(url)
+            worker_url = f"{WORKER_URL}{parsed.path}"
+            if parsed.query:
+                worker_url += f"?{parsed.query}"
+            response = await client.get(worker_url)
+        else:
+            response = await client.get(url)
+        
+        return WorkerResponse(status_code=response.status_code, text=response.text)
 
 
 # =============================================================================
