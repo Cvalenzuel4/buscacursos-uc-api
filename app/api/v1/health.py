@@ -54,19 +54,18 @@ async def scrape_test_endpoint():
     """
     Diagnostic endpoint to check if Render IP is blocked.
     """
-    from app.services.http_client import get_http_client
+    from app.services.http_client import get_page_content
+    from app.core.config import get_settings
     
-    client = get_http_client()
+    settings = get_settings()
     url = "https://buscacursos.uc.cl/"
     
     try:
-        # Use fetch method which is a simple GET
-        response = await client.fetch(url)
+        html = await get_page_content(url, {})
         return {
-            "success": True,
-            "status_code": response.status_code,
+            "success": True if html else False,
             "url": url,
-            "headers": dict(response.headers),
+            "content_length": len(html) if html else 0
         }
     except Exception as e:
         return {
@@ -83,37 +82,37 @@ async def scrape_test_endpoint():
 )
 async def full_scrape_test():
     """
-    Full diagnostic endpoint - does a real course search using curl_cffi.
+    Full diagnostic endpoint - does a real course search.
     """
-    from app.services.http_client import get_http_client
+    from app.services.http_client import get_page_content
     from app.services.scraper import parse_html_to_courses
-    from app.core.config import get_settings
     
-    settings = get_settings()
     results = {
-        "environment": settings.environment,
-        "strategy": "curl_cffi direct (no external proxy)",
+        "strategy": "ScrapingAnt (Prod) or curl_cffi (Dev)",
         "tests": {}
     }
     
-    client = get_http_client()
-    
-    # Test: Direct curl_cffi connection with browser impersonation
+    # Test: Real search
     try:
-        response = await client.search_courses(
-            semestre="2025-1",
-            sigla="MAT1610"
-        )
-        cursos = parse_html_to_courses(response.text)
-        results["tests"]["direct_scrape"] = {
+        url_target = "https://buscacursos.uc.cl/"
+        params = {
+            'cxml_semestre': '2026-1',
+            'cxml_sigla': 'MAT1610',
+            'cxml_horario_tipo_busqueda': 'si_tenga',
+            'cxml_horario_tipo_busqueda_actividad': 'TODOS',
+        }
+        
+        html = await get_page_content(url_target, params)
+        cursos = parse_html_to_courses(html)
+        
+        results["tests"]["search"] = {
             "success": True,
-            "status_code": response.status_code,
-            "response_length": len(response.text),
+            "response_length": len(html),
             "courses_found": len(cursos),
             "sample_course": cursos[0].nombre if cursos else None,
         }
     except Exception as e:
-        results["tests"]["direct_scrape"] = {
+        results["tests"]["search"] = {
             "success": False,
             "error_type": type(e).__name__,
             "error": str(e),

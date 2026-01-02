@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from app.api.v1 import cursos, health
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.services.http_client import close_http_client
+
 
 logger = get_logger("main")
 
@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down application...")
-    await close_http_client()
+    # await close_http_client() # No longer needed
     logger.info("Application shutdown complete")
 
 

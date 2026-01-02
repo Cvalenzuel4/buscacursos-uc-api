@@ -34,7 +34,7 @@ from bs4 import BeautifulSoup, Tag
 from app.core.cache import cached
 from app.core.logging import get_logger
 from app.models.schemas import CursoSchema, HorarioSchema, VacanteDistribucion
-from app.services.http_client import get_http_client
+from app.services.http_client import get_page_content
 
 logger = get_logger("scraper")
 
@@ -320,63 +320,11 @@ def parse_html_to_courses(html: str) -> List[CursoSchema]:
     return cursos
 
 
-# Backwards compatibility alias
-parse_cursos_table = parse_html_to_courses
-
-
 # ============================================================================
 # Main Scraper Functions
 # ============================================================================
 
-@cached
-async def buscar_cursos(
-    sigla: str,
-    semestre: str = "2026-1",  # Default semester updated to 2026-1
-    profesor: str | None = None,
-    campus: str | None = None,
-) -> List[CursoSchema]:
-    """
-    Search for courses in BuscaCursos UC.
-    
-    Args:
-        sigla: Course code (e.g., "IIC2233")
-        semestre: Semester (default: "2026-1")
-        profesor: Optional professor name filter
-        campus: Optional campus filter
-    
-    Returns:
-        List of matching CursoSchema objects
-    """
-    client = get_http_client()
-    
-    logger.info(f"Searching courses: sigla={sigla}, semestre={semestre}")
-    
-    try:
-        response = await client.search_courses(
-            semestre=semestre,
-            sigla=sigla,
-            profesor=profesor or "",
-            campus=campus or "",
-        )
-        
-        html = response.text
-        cursos = parse_html_to_courses(html)
-        
-        # Post-filter by professor if specified (case-insensitive)
-        if profesor and cursos:
-            profesor_lower = profesor.lower()
-            cursos = [
-                c for c in cursos 
-                if profesor_lower in c.profesor.lower()
-            ]
-        
-        logger.info(f"Found {len(cursos)} courses for {sigla}")
-        return cursos
-        
-    except Exception as e:
-        logger.error(f"Error searching courses: {e}")
-        raise
-
+from app.services.http_client import get_page_content
 
 async def get_semestres_disponibles() -> List[str]:
     """
@@ -387,11 +335,14 @@ async def get_semestres_disponibles() -> List[str]:
     """
     from app.core.config import get_settings
     settings = get_settings()
-    client = get_http_client()
     
     try:
-        response = await client.fetch(settings.buscacursos_base_url)
-        soup = BeautifulSoup(response.text, "lxml")
+        # Use simple params to get the page
+        html = await get_page_content(settings.buscacursos_base_url, {})
+        if not html:
+            return []
+            
+        soup = BeautifulSoup(html, "lxml")
         
         # Find semester dropdown
         select = soup.find("select", {"name": "cxml_semestre"})
@@ -417,17 +368,23 @@ async def get_vacantes_detalle(nrc: str, semestre: str) -> List[VacanteDistribuc
     """
     from app.core.config import get_settings
     settings = get_settings()
-    client = get_http_client()
     
     # URL construction
     base_url = settings.buscacursos_base_url
-    url = f"{base_url}/informacionVacReserva.ajax.php?nrc={nrc}&termcode={semestre}"
+    url = f"{base_url}/informacionVacReserva.ajax.php"
+    params = {
+        'nrc': nrc,
+        'termcode': semestre
+    }
     
     try:
         logger.info(f"Fetching vacancies details for NRC {nrc} - {semestre}")
-        response = await client.fetch(url)
+        html = await get_page_content(url, params)
         
-        soup = BeautifulSoup(response.text, "lxml")
+        if not html:
+            return []
+            
+        soup = BeautifulSoup(html, "lxml")
         
         # Find rows
         rows = soup.find_all("tr", class_=re.compile(r"resultadosRow(Par|Impar)"))

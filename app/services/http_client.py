@@ -1,198 +1,80 @@
-"""
-HTTP client for BuscaCursos UC.
-
-STRATEGY (Updated 2025-01):
-- Uses Cloudflare Worker as proxy for scraping.
-- Worker runs from Cloudflare's edge network (residential-like IPs).
-- Worker sends complete browser headers to bypass Cloudflare protection.
-
-Worker URL: https://proxy-uc.cristianvalmo.workers.dev/
-
-This approach is:
-- 100% FREE (Cloudflare Workers free tier: 100k requests/day)
-- Reliable (Cloudflare IPs are not blocked by Cloudflare)
-- Fast (edge network close to users)
-"""
+import os
 import urllib.parse
 import httpx
-from dataclasses import dataclass
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from curl_cffi.requests import AsyncSession
 
-from app.core.config import get_settings
-from app.core.logging import get_logger
+# Global client for reusing connections if needed (optional optimization)
+# For now, following the requested pattern of creating clients per request or as needed.
 
-logger = get_logger("http_client")
-
-BUSCACURSOS_BASE = "https://buscacursos.uc.cl"
-WORKER_URL = "https://proxy-uc.cristianvalmo.workers.dev/"
-
-
-@dataclass
-class WorkerResponse:
-    """Response wrapper to match previous interface."""
-    status_code: int
-    text: str
+async def get_page_content(url_base: str, params: dict) -> str:
+    env = os.getenv("ENVIRONMENT", "development")
     
-    @property
-    def content(self) -> bytes:
-        return self.text.encode('utf-8')
-
-
-class ScrapingHTTPClient:
-    """
-    HTTP Client using Cloudflare Worker as proxy.
-    
-    Routes all requests through the Worker which:
-    1. Runs from Cloudflare's edge network
-    2. Sends complete browser headers (Sec-Ch-Ua, Sec-Fetch-*, etc.)
-    3. Bypasses Cloudflare protection on BuscaCursos
-    """
-
-    def __init__(self):
-        self._client: httpx.AsyncClient | None = None
-        self._settings = get_settings()
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create httpx async client."""
-        if self._client is None:
-            # Use browser-like headers to avoid being blocked
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-            self._client = httpx.AsyncClient(
-                timeout=self._settings.http_timeout,
-                follow_redirects=True,
-                headers=headers,
-            )
-            logger.info("🌐 HTTP client created for Worker proxy")
-        return self._client
-
-    async def close(self) -> None:
-        """Close the client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
-        logger.debug("HTTP client closed")
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(Exception),
-        reraise=True
-    )
-    async def search_courses(
-        self,
-        semestre: str,
-        sigla: str = "",
-        nrc: str = "",
-        nombre: str = "",
-        profesor: str = "",
-        campus: str = "",
-        unidad_academica: str = "",
-    ) -> WorkerResponse:
-        """
-        Search courses via Cloudflare Worker proxy.
-        
-        The Worker handles all the Cloudflare bypass logic:
-        - Complete Chrome headers (Sec-Ch-Ua, etc.)
-        - Proper TLS negotiation
-        - Edge network IPs
-        """
-        # Build query parameters for BuscaCursos
-        params = {
-            "cxml_semestre": semestre,
-            "cxml_sigla": sigla.upper() if sigla else "",
-            "cxml_nrc": nrc,
-            "cxml_nombre": nombre,
-            "cxml_profesor": profesor,
-            "cxml_campus": campus,
-            "cxml_unidad_academica": unidad_academica,
-            "cxml_horario_tipo_busqueda": "si_tenga",
-            "cxml_horario_tipo_busqueda_actividad": "",
-        }
-
-        query_string = urllib.parse.urlencode(params)
-        target_url = f"{BUSCACURSOS_BASE}/?{query_string}"
-        
-        # Worker expects ?url=<encoded_target_url>
-        encoded_target = urllib.parse.quote(target_url, safe='')
-        worker_url = f"{WORKER_URL}?url={encoded_target}"
-        
-        logger.info(f"🔍 Searching via Worker: sigla={sigla}, semestre={semestre}")
-        logger.debug(f"Target URL: {target_url}")
+    # --- PRODUCCIÓN: SCRAPINGANT ---
+    if env == "production":
+        api_key = os.getenv("SCRAPINGANT_API_KEY", "75a9db475ec0490d832000f28260b91f")
+        if not api_key:
+            print("❌ Error: Falta SCRAPINGANT_API_KEY")
+            return ""
 
         try:
-            client = await self._get_client()
-            response = await client.get(worker_url)
+            query_string = urllib.parse.urlencode(params)
+            target_url = f"{url_base}?{query_string}"
             
-            text = response.text
-            logger.info(f"📥 Response: status={response.status_code}, length={len(text)}")
+            # Configuración "Low Cost" con parámetros del ejemplo
+            # Validado: http.client funciona donde httpx/async puede fallar en este entorno
+            import http.client
+            import asyncio
+            
+            # Construct parameters exactly as in the user example
+            sa_params = {
+                'url': target_url,
+                'x-api-key': api_key,
+                'proxy_type': 'residential',
+                'browser': 'false',  # Low cost
+                'return_page_source': 'true',
+            }
+            
+            def _sync_request():
+                try:
+                    conn = http.client.HTTPSConnection("api.scrapingant.com", timeout=60)
+                    # Helper to build query string for ScrapingAnt
+                    # We need to manually encode params
+                    q = urllib.parse.urlencode(sa_params)
+                    path = f"/v2/general?{q}"
+                    
+                    conn.request("GET", path)
+                    res = conn.getresponse()
+                    data = res.read()
+                    
+                    if res.status != 200:
+                        print(f"❌ ScrapingAnt Error: {res.status}")
+                        return ""
+                    return data.decode("utf-8")
+                except Exception as e:
+                    print(f"❌ ScrapingAnt Sync Error: {e}")
+                    return ""
 
-            # Check for Worker errors
-            if response.status_code != 200:
-                logger.error(f"❌ Worker returned HTTP {response.status_code}")
-                raise Exception(f"Worker error: HTTP {response.status_code}")
-            
-            # Check for Cloudflare challenge in response
-            if "Just a moment" in text and "Cloudflare" in text:
-                logger.error("❌ Cloudflare challenge page detected (Worker blocked)")
-                raise Exception("Cloudflare challenge detected. Worker may be blocked.")
-            
-            # Check if we got course data
-            has_course_data = "resultadosRow" in text
-            if has_course_data:
-                logger.info(f"✅ Course data found")
-            else:
-                logger.debug(f"No course rows found (may be empty search)")
-            
-            return WorkerResponse(status_code=response.status_code, text=text)
-            
-        except httpx.TimeoutException as e:
-            logger.error(f"❌ Worker timeout: {e}")
-            raise Exception(f"Worker timeout: {e}")
+            return await asyncio.to_thread(_sync_request)
+
         except Exception as e:
-            logger.error(f"❌ Request failed: {type(e).__name__}: {e}")
-            raise
-
-    async def fetch(self, url: str) -> WorkerResponse:
-        """
-        Generic GET request via Worker.
-        Routes any BuscaCursos URL through the Worker proxy.
-        """
-        client = await self._get_client()
-        
-        # Route through worker using ?url= parameter
-        if BUSCACURSOS_BASE in url:
-            encoded_url = urllib.parse.quote(url, safe='')
-            worker_url = f"{WORKER_URL}?url={encoded_url}"
-            response = await client.get(worker_url)
-        else:
-            response = await client.get(url)
-        
-        return WorkerResponse(status_code=response.status_code, text=response.text)
+            print(f"❌ Error Conexión Prod: {e}")
+            return ""
 
 
-# =============================================================================
-# =============================================================================
-# Global Client Instance
-# =============================================================================
 
-_http_client: ScrapingHTTPClient | None = None
-
-
-def get_http_client() -> ScrapingHTTPClient:
-    """Get the global HTTP client instance."""
-    global _http_client
-    if _http_client is None:
-        _http_client = ScrapingHTTPClient()
-    return _http_client
-
-
-async def close_http_client() -> None:
-    """Close the global HTTP client."""
-    global _http_client
-    if _http_client:
-        await _http_client.close()
-        _http_client = None
+    # --- LOCAL: CURL_CFFI ---
+    else:
+        print(f"💻 [LOCAL] Consultando directo...")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://buscacursos.uc.cl/",
+            "Upgrade-Insecure-Requests": "1"
+        }
+        try:
+            async with AsyncSession(impersonate="chrome120") as s:
+                response = await s.get(url_base, params=params, headers=headers, timeout=30)
+                if response.status_code == 403: return ""
+                return response.text
+        except Exception as e:
+            print(f"❌ Error Local: {e}")
+            return ""

@@ -295,6 +295,13 @@ class ErrorResponse(BaseModel):
         }
 
 
+class SearchResponse(BaseModel):
+    """Response model for course search."""
+    semestre: str
+    cantidad: int
+    resultados: list[CursoSchema]
+
+
 class HealthResponse(BaseModel):
     """Health check response."""
     
