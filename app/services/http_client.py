@@ -30,7 +30,7 @@ async def get_page_content(url_base: str, params: dict) -> str:
                 'url': target_url,
                 'x-api-key': api_key,
                 'proxy_type': 'residential',
-                'browser': 'false',  # Low cost
+                'browser': 'true',  # Required to avoid 423
                 'return_page_source': 'true',
             }
             
