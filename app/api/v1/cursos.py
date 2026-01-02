@@ -144,16 +144,31 @@ async def buscar_cursos_endpoint(
         )
         
     except Exception as e:
-        logger.error(f"Error searching courses: {e}")
+        error_msg = str(e)
+        error_type = type(e).__name__
+        logger.error(f"Error searching courses: {error_type}: {error_msg}", exc_info=True)
         
         # Check if it's a connection error to BuscaCursos
-        if "timeout" in str(e).lower() or "connection" in str(e).lower():
+        if "timeout" in error_msg.lower() or "connection" in error_msg.lower():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
                     "success": False,
                     "error": "SERVICE_UNAVAILABLE",
                     "detail": "BuscaCursos UC no está disponible en este momento. Intente más tarde.",
+                    "debug": f"{error_type}: {error_msg}",
+                },
+            )
+        
+        # Check if Worker is blocked
+        if "captcha" in error_msg.lower() or "blocked" in error_msg.lower() or "challenge" in error_msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "success": False,
+                    "error": "SCRAPER_BLOCKED",
+                    "detail": "El scraper está siendo bloqueado por BuscaCursos UC.",
+                    "debug": f"{error_type}: {error_msg}",
                 },
             )
         
@@ -163,6 +178,7 @@ async def buscar_cursos_endpoint(
                 "success": False,
                 "error": "INTERNAL_ERROR",
                 "detail": "Error interno del servidor",
+                "debug": f"{error_type}: {error_msg}",
             },
         )
 

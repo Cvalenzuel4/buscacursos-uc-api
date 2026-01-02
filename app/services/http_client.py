@@ -67,8 +67,8 @@ class ScrapingHTTPClient:
         logger.debug("Sessions closed")
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=2, max=15),
         retry=retry_if_exception_type(Exception),
         reraise=True
     )
@@ -105,7 +105,11 @@ class ScrapingHTTPClient:
         if env == "production":
             logger.info(f"🚀 Modo PROD: Routing via Cloudflare Worker -> {WORKER_PROXY_URL}")
             
-            client = await self._get_httpx_client()
+            try:
+                client = await self._get_httpx_client()
+            except Exception as e:
+                logger.error(f"❌ Error creating httpx client: {type(e).__name__}: {e}")
+                raise Exception(f"Failed to create HTTP client: {e}") from e
             
             # 1. Build full target URL manually because Worker expects it in 'url' param
             query_string = urllib.parse.urlencode(params)
@@ -116,14 +120,48 @@ class ScrapingHTTPClient:
             proxy_params = {"url": target_url}
             
             logger.debug(f"Worker Target: {target_url}")
+            logger.info(f"📡 Requesting: sigla={sigla}, semestre={semestre}")
 
-            response = await client.get(WORKER_PROXY_URL, params=proxy_params)
+            try:
+                response = await client.get(WORKER_PROXY_URL, params=proxy_params)
+            except httpx.TimeoutException as e:
+                logger.error(f"❌ Timeout calling Worker: {e}")
+                raise Exception(f"Worker timeout: {e}") from e
+            except httpx.ConnectError as e:
+                logger.error(f"❌ Connection error to Worker: {e}")
+                raise Exception(f"Worker connection failed: {e}") from e
+            except Exception as e:
+                logger.error(f"❌ Unexpected error calling Worker: {type(e).__name__}: {e}")
+                raise Exception(f"Worker request failed: {type(e).__name__}: {e}") from e
+
+            logger.info(f"📥 Worker response: status={response.status_code}, length={len(response.text)}")
 
             if response.status_code != 200:
                 logger.error(f"❌ Error Worker: {response.status_code}")
                 # Log snippet for debugging
-                logger.error(f"Worker Body Snippet: {response.text[:200]}")
-                raise Exception(f"Worker failed with {response.status_code}")
+                logger.error(f"Worker Body Snippet: {response.text[:500]}")
+                raise Exception(f"Worker failed with status {response.status_code}: {response.text[:200]}")
+            
+            # Verificar que la respuesta tenga contenido HTML válido
+            if len(response.text) < 100:
+                logger.warning(f"⚠️ Response too short ({len(response.text)} chars): {response.text}")
+            
+            # IMPORTANTE: Solo considerar captcha/challenge si NO hay datos de cursos
+            # El HTML de BuscaCursos incluye scripts de Cloudflare que contienen "challenge"
+            # pero si hay "resultadosRow" significa que los datos están presentes
+            has_course_data = "resultadosRow" in response.text
+            has_blocking_page = (
+                ("captcha" in response.text.lower() or "cf-turnstile" in response.text.lower())
+                and not has_course_data
+            )
+            
+            if has_blocking_page:
+                logger.error("❌ Captcha/Challenge page detected (no course data)")
+                raise Exception("BuscaCursos returned captcha/challenge page - Worker may be blocked")
+            
+            if not has_course_data and len(response.text) > 1000:
+                # Puede ser una página sin resultados o un error
+                logger.debug(f"No resultadosRow found, checking if valid empty response...")
 
             # Return compatible Response object (curl_cffi style)
             # We wrap httpx response in a curl_cffi-like object or return it directly 
