@@ -11,7 +11,7 @@ async def get_page_content(url_base: str, params: dict) -> str:
     
     # --- PRODUCCIÓN: SCRAPINGANT ---
     if env == "production":
-        api_key = os.getenv("SCRAPINGANT_API_KEY", "75a9db475ec0490d832000f28260b91f")
+        api_key = os.getenv("SCRAPINGANT_API_KEY")
         if not api_key:
             print("❌ Error: Falta SCRAPINGANT_API_KEY")
             return ""
