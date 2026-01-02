@@ -83,29 +83,29 @@ async def scrape_test_endpoint():
 )
 async def full_scrape_test():
     """
-    Full diagnostic endpoint - does a real course search.
+    Full diagnostic endpoint - does a real course search using curl_cffi.
     """
     from app.services.http_client import get_http_client
     from app.services.scraper import parse_html_to_courses
     from app.core.config import get_settings
-    import httpx
     
     settings = get_settings()
     results = {
         "environment": settings.environment,
+        "strategy": "curl_cffi direct (no external proxy)",
         "tests": {}
     }
     
     client = get_http_client()
     
-    # Test 1: Worker connectivity
+    # Test: Direct curl_cffi connection with browser impersonation
     try:
         response = await client.search_courses(
             semestre="2025-1",
             sigla="MAT1610"
         )
         cursos = parse_html_to_courses(response.text)
-        results["tests"]["worker_search"] = {
+        results["tests"]["direct_scrape"] = {
             "success": True,
             "status_code": response.status_code,
             "response_length": len(response.text),
@@ -113,27 +113,7 @@ async def full_scrape_test():
             "sample_course": cursos[0].nombre if cursos else None,
         }
     except Exception as e:
-        results["tests"]["worker_search"] = {
-            "success": False,
-            "error_type": type(e).__name__,
-            "error": str(e),
-        }
-    
-    # Test 2: Direct Worker call (to check if Worker itself is working)
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as test_client:
-            worker_response = await test_client.get(
-                "https://proxy-uc.cristianvalmo.workers.dev/",
-                params={"url": "https://buscacursos.uc.cl/"}
-            )
-            results["tests"]["worker_direct"] = {
-                "success": worker_response.status_code == 200,
-                "status_code": worker_response.status_code,
-                "response_length": len(worker_response.text),
-                "has_results": "resultadosRow" in worker_response.text or "buscacursos" in worker_response.text.lower(),
-            }
-    except Exception as e:
-        results["tests"]["worker_direct"] = {
+        results["tests"]["direct_scrape"] = {
             "success": False,
             "error_type": type(e).__name__,
             "error": str(e),

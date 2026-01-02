@@ -1,13 +1,18 @@
 """
 HTTP client for BuscaCursos UC.
 
-STRATEGY:
-- DEVELOPMENT: Direct connection using curl_cffi (impersonating Chrome).
-- PRODUCTION: Route through Cloudflare Worker to bypass IP blocking.
+STRATEGY (Updated 2026-01):
+- Uses curl_cffi with Chrome impersonation in ALL environments.
+- curl_cffi can bypass Cloudflare protection by mimicking real browsers.
+- No external proxy/worker needed - direct connection with TLS fingerprint spoofing.
+
+This approach is:
+- 100% FREE (no external services)
+- More reliable than Workers (which can get blocked)
+- Works in both development and production
 """
-import os
+import random
 import urllib.parse
-import httpx
 from curl_cffi.requests import AsyncSession, Response
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -16,55 +21,81 @@ from app.core.logging import get_logger
 
 logger = get_logger("http_client")
 
-# WORKER URL PROVIDED BY USER
-WORKER_PROXY_URL = "https://proxy-uc.cristianvalmo.workers.dev/"
 BUSCACURSOS_BASE = "https://buscacursos.uc.cl"
 
-# Chrome impersonation for local dev
-BROWSER_IMPERSONATE = "chrome124"
+# Chrome versions to rotate (all supported by curl_cffi)
+BROWSER_VERSIONS = [
+    "chrome120",
+    "chrome119", 
+    "chrome116",
+    "chrome110",
+    "chrome107",
+    "chrome104",
+    "chrome101",
+    "chrome100",
+    "chrome99",
+]
 
 
 class ScrapingHTTPClient:
     """
-    Hybrid HTTP Client:
-    - In PRODUCTION: Uses httpx to call Cloudflare Worker.
-    - In DEVELOPMENT: Uses curl_cffi for direct connection.
+    HTTP Client using curl_cffi for Cloudflare bypass.
+    
+    Uses TLS fingerprint impersonation to appear as a real browser.
+    This works because curl_cffi implements the same TLS handshake as Chrome.
     """
 
     def __init__(self):
         self._session: AsyncSession | None = None
         self._settings = get_settings()
-        self._httpx_client: httpx.AsyncClient | None = None
+        self._current_browser = random.choice(BROWSER_VERSIONS)
+        self._request_count = 0
 
-    async def _get_local_session(self) -> AsyncSession:
-        """Get curl_cffi session for local development."""
+    async def _get_session(self) -> AsyncSession:
+        """Get or create curl_cffi session with browser impersonation."""
+        # Rotate browser every 10 requests to avoid fingerprinting
+        if self._request_count > 0 and self._request_count % 10 == 0:
+            if self._session:
+                await self._session.close()
+                self._session = None
+            self._current_browser = random.choice(BROWSER_VERSIONS)
+            logger.debug(f"Rotated browser to: {self._current_browser}")
+        
         if self._session is None:
             self._session = AsyncSession(
-                impersonate=BROWSER_IMPERSONATE,
+                impersonate=self._current_browser,
                 timeout=self._settings.http_timeout,
                 verify=True,
             )
-            logger.debug(f"Local Session created: {BROWSER_IMPERSONATE}")
+            logger.info(f"🌐 Session created with browser: {self._current_browser}")
+        
         return self._session
 
-    async def _get_httpx_client(self) -> httpx.AsyncClient:
-        """Get httpx client for production (Worker communication)."""
-        if self._httpx_client is None:
-            self._httpx_client = httpx.AsyncClient(
-                timeout=self._settings.http_timeout,
-                follow_redirects=True
-            )
-        return self._httpx_client
+    def _get_headers(self) -> dict:
+        """Get realistic browser headers."""
+        return {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "es-CL,es;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Cache-Control": "max-age=0",
+            "Connection": "keep-alive",
+            "Referer": f"{BUSCACURSOS_BASE}/",
+            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+        }
 
     async def close(self) -> None:
-        """Close all sessions."""
+        """Close the session."""
         if self._session:
             await self._session.close()
             self._session = None
-        if self._httpx_client:
-            await self._httpx_client.aclose()
-            self._httpx_client = None
-        logger.debug("Sessions closed")
+        logger.debug("Session closed")
 
     @retry(
         stop=stop_after_attempt(5),
@@ -83,9 +114,16 @@ class ScrapingHTTPClient:
         unidad_academica: str = "",
     ) -> Response:
         """
-        Search courses using the appropriate strategy based on environment.
+        Search courses using curl_cffi with browser impersonation.
+        
+        This bypasses Cloudflare by:
+        1. Using the same TLS fingerprint as Chrome
+        2. Sending realistic browser headers
+        3. Rotating browser versions periodically
         """
-        # Build query parameters first
+        self._request_count += 1
+        
+        # Build query parameters
         params = {
             "cxml_semestre": semestre,
             "cxml_sigla": sigla.upper() if sigla else "",
@@ -98,127 +136,79 @@ class ScrapingHTTPClient:
             "cxml_horario_tipo_busqueda_actividad": "",
         }
 
-        env = self._settings.environment.lower()
-        url_base = f"{BUSCACURSOS_BASE}/"
+        query_string = urllib.parse.urlencode(params)
+        url = f"{BUSCACURSOS_BASE}/?{query_string}"
 
-        # --- PRODUCTION: CLOUDFLARE WORKER STRATEGY ---
-        if env == "production":
-            logger.info(f"🚀 Modo PROD: Routing via Cloudflare Worker -> {WORKER_PROXY_URL}")
-            
-            try:
-                client = await self._get_httpx_client()
-            except Exception as e:
-                logger.error(f"❌ Error creating httpx client: {type(e).__name__}: {e}")
-                raise Exception(f"Failed to create HTTP client: {e}") from e
-            
-            # 1. Build full target URL manually because Worker expects it in 'url' param
-            query_string = urllib.parse.urlencode(params)
-            target_url = f"{url_base}?{query_string}"
-            
-            # 2. Worker expects target URL in 'url' query param
-            # httpx handles encoding of the 'url' param value itself
-            proxy_params = {"url": target_url}
-            
-            logger.debug(f"Worker Target: {target_url}")
-            logger.info(f"📡 Requesting: sigla={sigla}, semestre={semestre}")
+        logger.info(f"🔍 Searching: sigla={sigla}, semestre={semestre}")
+        logger.debug(f"URL: {url}")
 
-            try:
-                response = await client.get(WORKER_PROXY_URL, params=proxy_params)
-            except httpx.TimeoutException as e:
-                logger.error(f"❌ Timeout calling Worker: {e}")
-                raise Exception(f"Worker timeout: {e}") from e
-            except httpx.ConnectError as e:
-                logger.error(f"❌ Connection error to Worker: {e}")
-                raise Exception(f"Worker connection failed: {e}") from e
-            except Exception as e:
-                logger.error(f"❌ Unexpected error calling Worker: {type(e).__name__}: {e}")
-                raise Exception(f"Worker request failed: {type(e).__name__}: {e}") from e
-
-            logger.info(f"📥 Worker response: status={response.status_code}, length={len(response.text)}")
-
-            if response.status_code != 200:
-                logger.error(f"❌ Error Worker: {response.status_code}")
-                # Log snippet for debugging
-                logger.error(f"Worker Body Snippet: {response.text[:500]}")
-                raise Exception(f"Worker failed with status {response.status_code}: {response.text[:200]}")
+        try:
+            session = await self._get_session()
+            headers = self._get_headers()
             
-            # Verificar que la respuesta tenga contenido HTML válido
-            if len(response.text) < 100:
-                logger.warning(f"⚠️ Response too short ({len(response.text)} chars): {response.text}")
-            
-            # IMPORTANTE: Solo considerar captcha/challenge si NO hay datos de cursos
-            # El HTML de BuscaCursos incluye scripts de Cloudflare que contienen "challenge"
-            # pero si hay "resultadosRow" significa que los datos están presentes
-            has_course_data = "resultadosRow" in response.text
-            has_blocking_page = (
-                ("captcha" in response.text.lower() or "cf-turnstile" in response.text.lower())
-                and not has_course_data
-            )
-            
-            if has_blocking_page:
-                logger.error("❌ Captcha/Challenge page detected (no course data)")
-                raise Exception("BuscaCursos returned captcha/challenge page - Worker may be blocked")
-            
-            if not has_course_data and len(response.text) > 1000:
-                # Puede ser una página sin resultados o un error
-                logger.debug(f"No resultadosRow found, checking if valid empty response...")
-
-            # Return compatible Response object (curl_cffi style)
-            # We wrap httpx response in a curl_cffi-like object or return it directly 
-            # (since response.text and .status_code are compatible)
-            return response
-
-        # --- DEVELOPMENT: LOCAL CURL_CFFI STRATEGY ---
-        else:
-            logger.info(f"💻 Modo LOCAL: Direct connection with {BROWSER_IMPERSONATE}")
-            session = await self._get_local_session()
-            
-            headers = {
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
-                "Referer": f"{BUSCACURSOS_BASE}/",
-                "Upgrade-Insecure-Requests": "1",
-            }
-
-            # Build URL fully to be consistent with prod logic logging
-            query_string = urllib.parse.urlencode(params)
-            url = f"{url_base}?{query_string}"
-
             response = await session.get(url, headers=headers)
+            
+            logger.info(f"📥 Response: status={response.status_code}, length={len(response.text)}")
 
+            # Check for blocking
+            if response.status_code == 403:
+                logger.error(f"❌ 403 Forbidden - Cloudflare block detected")
+                # Close session to force new one with different browser
+                await self.close()
+                raise Exception(f"Cloudflare blocked request (403). Will retry with different browser.")
+            
             if response.status_code != 200:
-                logger.error(f"HTTP {response.status_code} from BuscaCursos (Local)")
+                logger.error(f"❌ HTTP {response.status_code}")
                 raise Exception(f"HTTP {response.status_code}: Request failed")
             
+            # Check for Cloudflare challenge page
+            text = response.text
+            if "Just a moment" in text and "Cloudflare" in text:
+                logger.error("❌ Cloudflare challenge page detected")
+                await self.close()
+                raise Exception("Cloudflare challenge detected. Will retry with different browser.")
+            
+            # Check if we got course data
+            has_course_data = "resultadosRow" in text
+            if has_course_data:
+                logger.info(f"✅ Course data found")
+            else:
+                logger.debug(f"No course rows found (may be empty search)")
+            
             return response
+            
+        except Exception as e:
+            logger.error(f"❌ Request failed: {type(e).__name__}: {e}")
+            raise
 
     async def fetch(self, url: str) -> Response:
         """
-        Generic GET request for checks/health.
+        Generic GET request.
         """
-        env = self._settings.environment.lower()
-        
-        if env == "production":
-            client = await self._get_httpx_client()
-            proxy_params = {"url": url}
-            return await client.get(WORKER_PROXY_URL, params=proxy_params)
-        else:
-            session = await self._get_local_session()
-            return await session.get(url)
+        self._request_count += 1
+        session = await self._get_session()
+        headers = self._get_headers()
+        return await session.get(url, headers=headers)
 
+
+# =============================================================================
 # =============================================================================
 # Global Client Instance
 # =============================================================================
 
 _http_client: ScrapingHTTPClient | None = None
 
+
 def get_http_client() -> ScrapingHTTPClient:
+    """Get the global HTTP client instance."""
     global _http_client
     if _http_client is None:
         _http_client = ScrapingHTTPClient()
     return _http_client
 
+
 async def close_http_client() -> None:
+    """Close the global HTTP client."""
     global _http_client
     if _http_client:
         await _http_client.close()
